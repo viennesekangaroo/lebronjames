@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# data — raw Kaggle dumps + generated DB
+/data/raw/*
+!/data/raw/.gitkeep
+/data/*.db
+/data/*.sqlite
