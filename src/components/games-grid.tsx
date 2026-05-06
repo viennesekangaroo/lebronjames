@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findTeam, logoUrl } from "@/lib/teams";
 import type { GamesPayload, SeasonRow, GameCell } from "@/lib/api-types";
+import { BallLoader } from "@/components/ball-loader";
 
 type ApiErr = { code: "DB_NOT_SEEDED" | "DB_ERROR" | "HTTP"; message: string };
 
@@ -114,15 +115,7 @@ export function GamesGrid() {
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-black">
-      {!data && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
-          <style>{`@keyframes spin-ball { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-          <svg viewBox="0 0 512 512" width="40" height="40" fill="#e87e24" style={{ animation: "spin-ball 1.2s linear infinite" }}>
-            <path d="M86.8 48C142.1 17.2 205.1 0 272 0c18.6 0 36.8 1.6 54.6 4.7C263.1 45.1 208.3 108.4 181 185c-9.1-5.3-19-9.8-29.6-13.3C120.3 161.8 96.5 156 74 152.8c-5.9-.8-11.9-1.5-17.8-2C59.1 120.4 70 92.9 86.8 48zM3.2 189.5C14.3 190.8 25.4 192.7 36.3 195.1c19.5 3.9 38.1 9.6 55.3 17c-26 67.3-34.2 142.3-22 213.6C29.5 381.5 3.3 326.5 .3 265.4c-.2-4.5-.3-9-.3-13.4c0-21.8 1.1-43.2 3.2-64.5zM108.5 460.3c-8.1-62.8-2.2-128.5 19.6-189.6c8.8 3.7 17.1 8.2 24.8 13.5c0 0 0 0 0 0c24.4 16.8 43 40.3 53.1 68.2c16.5 45.6 12.7 95-8.4 136C166.6 492.6 135.8 479 108.5 460.3z" />
-          </svg>
-          <span className="text-white/30 text-xs uppercase tracking-[0.4em]">loading</span>
-        </div>
-      )}
+      {!data && <BallLoader color="#e87e24" />}
 
       {data && layout && (
         <>

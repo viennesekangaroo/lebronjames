@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { drawFullCourt, nbaToCanvasFullCourt } from "@/lib/court";
 import { TEAM_ERAS, eraMatches, type TeamEra } from "@/lib/team-eras";
+import { BallLoader } from "@/components/ball-loader";
 
 type Shot = {
   game_date: string;
@@ -273,11 +274,7 @@ export function ShotChart() {
       <div className="relative flex min-w-0 flex-1 flex-col">
         <div ref={wrapRef} className="relative min-h-0 flex-1">
           <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-          {!data && (
-            <div className="absolute inset-0 flex items-center justify-center text-white/40 text-xs uppercase tracking-[0.4em]">
-              loading shot chart…
-            </div>
-          )}
+          {!data && <BallLoader color="#ff6b1a" label="loading shots" />}
           {data && (
             <>
               <Legend resultFilter={resultFilter} onToggle={setResultFilter} />

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findTeam, logoUrl } from "@/lib/teams";
 import type { PointsPayload, SeasonRollup, MinuteCell } from "@/lib/api-types";
+import { BallLoader } from "@/components/ball-loader";
 
 type ApiErr = { code: "PBP_NOT_INGESTED" | "DB_ERROR" | "HTTP"; message: string };
 
@@ -128,15 +129,7 @@ export function PointsGrid() {
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-black">
-      {!data && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
-          <style>{`@keyframes spin-ball { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-          <svg viewBox="0 0 512 512" width="40" height="40" fill="#e87e24" style={{ animation: "spin-ball 1.2s linear infinite" }}>
-            <path d="M86.8 48C142.1 17.2 205.1 0 272 0c18.6 0 36.8 1.6 54.6 4.7C263.1 45.1 208.3 108.4 181 185c-9.1-5.3-19-9.8-29.6-13.3C120.3 161.8 96.5 156 74 152.8c-5.9-.8-11.9-1.5-17.8-2C59.1 120.4 70 92.9 86.8 48zM3.2 189.5C14.3 190.8 25.4 192.7 36.3 195.1c19.5 3.9 38.1 9.6 55.3 17c-26 67.3-34.2 142.3-22 213.6C29.5 381.5 3.3 326.5 .3 265.4c-.2-4.5-.3-9-.3-13.4c0-21.8 1.1-43.2 3.2-64.5zM108.5 460.3c-8.1-62.8-2.2-128.5 19.6-189.6c8.8 3.7 17.1 8.2 24.8 13.5c0 0 0 0 0 0c24.4 16.8 43 40.3 53.1 68.2c16.5 45.6 12.7 95-8.4 136C166.6 492.6 135.8 479 108.5 460.3zM232.7 471.3c18.5-42.7 21.1-92.2 5.4-137.5c-11.9-34.3-33.7-63.4-62.5-83.3c0 0 0 0 0 0c-5.4-3.7-11-7.1-16.8-10C188.1 160.4 240.6 96.3 308.7 54.8c37.2 14.3 70.7 36.8 98.3 65.5c-58 53.2-97.8 126.5-107.8 209c-25.1 1.5-49.3 11.5-69 29.8c-5 4.6-9.5 9.7-13.5 15.1zM234.2 512C233.5 512 232.7 512 232 512c.2 0 .5 0 .7 0l1.5 0zM464 256c0 36.5-7.6 71.2-21.3 102.6c-21.3-31.4-54.1-53.5-92.2-60.8c9.3-75.2 46.1-141.5 99-190.3c24.5 40 38.5 86.8 38.5 136.8c0 4.2-.1 8.3-.4 12.5l.4 0c0-.1 0-.1 0-.2z" />
-          </svg>
-          <span className="text-white/30 text-xs uppercase tracking-[0.4em]">loading</span>
-        </div>
-      )}
+      {!data && <BallLoader color="#a78bfa" />}
 
       {data && layout && (
         <>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ComputedRecords } from "@/lib/api-types";
+import { BallLoader } from "@/components/ball-loader";
 
 // Hybrid records page: career-volume numbers come from the SQLite DB (always
 // current with the seed); award counts, win shares, VORP, and "all-time #1"
@@ -118,8 +119,8 @@ export function RecordsPage() {
   }
   if (!data) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-black">
-        <span className="text-white/30 text-xs uppercase tracking-[0.4em]">loading</span>
+      <div className="relative h-full w-full bg-black">
+        <BallLoader color="#fdb927" />
       </div>
     );
   }

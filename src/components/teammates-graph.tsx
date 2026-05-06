@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { findTeam, logoUrl } from "@/lib/teams";
+import { BallLoader } from "@/components/ball-loader";
 
 function withAlpha(hex: string, alpha: number): string {
   if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
@@ -833,22 +834,7 @@ export function TeammatesGraph() {
           style={{ width: size.w, height: size.h }}
         />
       )}
-      {!data && !apiErr && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
-          <style>{`
-            @keyframes spin-ball { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-          `}</style>
-          <svg viewBox="0 0 100 100" width="52" height="52" style={{ animation: "spin-ball 1.2s linear infinite" }}>
-            <circle cx="50" cy="50" r="48" fill="#8a64ff" />
-            <circle cx="50" cy="50" r="48" fill="none" stroke="#6b4fcc" strokeWidth="2" />
-            <path d="M2 50 C25 35, 75 65, 98 50" fill="none" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
-            <path d="M50 2 C35 25, 65 75, 50 98" fill="none" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
-            <path d="M10 22 C22 32, 22 42, 14 56" fill="none" stroke="#1a1a1a" strokeWidth="2" strokeLinecap="round" />
-            <path d="M90 78 C78 68, 78 58, 86 44" fill="none" stroke="#1a1a1a" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-          <span className="text-white/30 text-xs uppercase tracking-[0.4em]">loading</span>
-        </div>
-      )}
+      {!data && !apiErr && <BallLoader color="#8a64ff" />}
       {data && (
         <>
           <TeammatesControls

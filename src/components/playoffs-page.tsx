@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { findTeam } from "@/lib/teams";
 import type { PlayoffsPayload, FinalsEntry } from "@/lib/api-types";
+import { BallLoader } from "@/components/ball-loader";
 
 type ApiErr = { code: string; message: string };
 
@@ -52,8 +53,8 @@ export function PlayoffsPage() {
   }
   if (!data) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-black">
-        <span className="text-white/30 text-xs uppercase tracking-[0.4em]">loading</span>
+      <div className="relative h-full w-full bg-black">
+        <BallLoader color="#c9a449" />
       </div>
     );
   }
