@@ -36,12 +36,12 @@ function seasonLabel(startYear: number): string {
   return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
 }
 
-async function fetchGameLog(seasonStartYear: number) {
+async function fetchGameLog(seasonStartYear: number, seasonType: "Regular Season" | "Playoffs" = "Regular Season") {
   const season = seasonLabel(seasonStartYear);
   const url = new URL("https://stats.nba.com/stats/playergamelog");
   url.searchParams.set("PlayerID", String(LEBRON_ID));
   url.searchParams.set("Season", season);
-  url.searchParams.set("SeasonType", "Regular Season");
+  url.searchParams.set("SeasonType", seasonType);
   url.searchParams.set("LeagueID", "00");
 
   // stats.nba.com sometimes hangs. Bound each request, retry once on timeout.
@@ -131,53 +131,49 @@ async function main() {
   let added = 0;
   for (const sy of seasons) {
     const season = seasonLabel(sy);
-    let log: Awaited<ReturnType<typeof fetchGameLog>>;
-    try {
-      log = await fetchGameLog(sy);
-    } catch (err) {
-      console.warn(`  ${season}: skipped (${(err as Error).message})`);
-      continue;
-    }
-    if (log.length === 0) {
-      // stats.nba.com returns an empty rowSet for seasons that haven't started; skip silently.
-      continue;
-    }
-
-    // ID-set diff against the DB so we catch any game the seed CSV missed,
-    // not just games newer than the latest seeded date.
-    const seeded = new Set(
-      (db
-        .prepare(
-          `SELECT a.game_id FROM appearances a JOIN games g ON g.id=a.game_id
-           WHERE a.player_id = ? AND g.season = ? AND g.game_type = 'Regular Season'`,
-        )
-        .all(LEBRON_ID, season) as { game_id: string }[]).map((r) => r.game_id),
-    );
-    const missing = log.filter((g) => !seeded.has(g.gameId));
-    console.log(`  ${season}: API ${log.length}g, seeded ${seeded.size}g, missing ${missing.length}g`);
-    if (missing.length === 0) continue;
-
-    for (const g of missing) {
-      const matchup = parseMatchup(g.matchup);
-      if (!matchup) {
-        console.warn(`    skip ${g.gameId}: cannot parse matchup "${g.matchup}"`);
+    for (const seasonType of ["Regular Season", "Playoffs"] as const) {
+      let log: Awaited<ReturnType<typeof fetchGameLog>>;
+      try {
+        log = await fetchGameLog(sy, seasonType);
+      } catch (err) {
+        console.warn(`  ${season} ${seasonType}: skipped (${(err as Error).message})`);
         continue;
       }
-      const lebronTeamAbbr = g.matchup.slice(0, 3);
-      const teamId = teamByAbbr.get(lebronTeamAbbr);
-      const oppId = teamByAbbr.get(matchup.oppAbbr);
-      if (!teamId || !oppId) {
-        console.warn(`    skip ${g.gameId}: unknown team abbr ${lebronTeamAbbr}/${matchup.oppAbbr}`);
-        continue;
-      }
-      insertGame.run(g.gameId, g.gameDate, season, "Regular Season");
-      insertApp.run(g.gameId, LEBRON_ID, teamId, oppId, matchup.isHome, g.win, g.minutes, g.points, g.assists);
-      added++;
-      console.log(`    + ${g.gameDate} ${g.matchup}: ${g.points} pts / ${g.assists} ast`);
-    }
+      if (log.length === 0) continue; // empty before season started, or no playoff appearance
 
-    // Be polite to stats.nba.com — pace season requests.
-    await new Promise((r) => setTimeout(r, 600));
+      const seeded = new Set(
+        (db
+          .prepare(
+            `SELECT a.game_id FROM appearances a JOIN games g ON g.id=a.game_id
+             WHERE a.player_id = ? AND g.season = ? AND g.game_type = ?`,
+          )
+          .all(LEBRON_ID, season, seasonType) as { game_id: string }[]).map((r) => r.game_id),
+      );
+      const missing = log.filter((g) => !seeded.has(g.gameId));
+      console.log(`  ${season} ${seasonType}: API ${log.length}g, seeded ${seeded.size}g, missing ${missing.length}g`);
+      if (missing.length === 0) continue;
+
+      for (const g of missing) {
+        const matchup = parseMatchup(g.matchup);
+        if (!matchup) {
+          console.warn(`    skip ${g.gameId}: cannot parse matchup "${g.matchup}"`);
+          continue;
+        }
+        const lebronTeamAbbr = g.matchup.slice(0, 3);
+        const teamId = teamByAbbr.get(lebronTeamAbbr);
+        const oppId = teamByAbbr.get(matchup.oppAbbr);
+        if (!teamId || !oppId) {
+          console.warn(`    skip ${g.gameId}: unknown team abbr ${lebronTeamAbbr}/${matchup.oppAbbr}`);
+          continue;
+        }
+        insertGame.run(g.gameId, g.gameDate, season, seasonType);
+        insertApp.run(g.gameId, LEBRON_ID, teamId, oppId, matchup.isHome, g.win, g.minutes, g.points, g.assists);
+        added++;
+        console.log(`    + ${g.gameDate} ${seasonType[0]} ${g.matchup}: ${g.points} pts / ${g.assists} ast`);
+      }
+
+      await new Promise((r) => setTimeout(r, 600));
+    }
   }
 
   const after = db
