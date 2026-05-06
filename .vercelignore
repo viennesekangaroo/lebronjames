@@ -1,0 +1,10 @@
+# The API route handlers are only used at build time (by scripts/prebuild-static.ts)
+# to generate /public/api/*.json. The deployed site reads those static JSONs and
+# never invokes a database, so we don't need (or want) the routes deployed —
+# excluding them avoids bundling better-sqlite3 (native module) into Vercel.
+src/app/api/
+
+# Local-only — large dataset that doesn't deploy.
+data/
+
+# Keep the static prebuilt JSONs (we DO want public/api/*.json deployed).

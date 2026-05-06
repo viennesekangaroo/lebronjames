@@ -1,18 +1,22 @@
 /**
- * Ingests LeBron James's assists from the same NBA Stats PBP CSVs used by
- * `ingest-pbp.ts` (shufinskiy/nba_data) and writes per-teammate aggregates
- * to a `lebron_assists_to` table:
+ * Ingests LeBron's two-way assist relationships from the NBA Stats PBP CSVs
+ * (shufinskiy/nba_data) and writes per-teammate aggregates to two tables:
  *
- *   scorer_player_id  INTEGER  — players.id of the assisted teammate
- *   assists           INTEGER  — count of made FGs LeBron assisted on
- *   points_off        INTEGER  — points scored by the teammate on those FGs (2 or 3)
+ *   lebron_assists_to    — assists LeBron threw to each teammate
+ *   lebron_assisted_by   — assists each teammate threw to LeBron
+ *
+ * Schema (both tables):
+ *   teammate_player_id  INTEGER  — players.id of the other player
+ *   assists             INTEGER  — count of made FGs in this direction
+ *   points_off          INTEGER  — points scored on those FGs (2 or 3)
  *
  *   Run: npm run ingest:assists
  *
- * Detection: EVENTMSGTYPE=1 (made FG) AND PLAYER2_ID = 2544 (LeBron). For made
- * FGs the secondary player slot is the assister; PLAYER1 is the scorer.
- * Points-on-event come from the running "(N PTS)" total in the description,
- * same trick as ingest-pbp.ts.
+ * Detection: EVENTMSGTYPE=1 (made FG). PLAYER1 = scorer, PLAYER2 = assister.
+ *   - "to":  PLAYER2 = LeBron (LeBron assisted PLAYER1)
+ *   - "by":  PLAYER1 = LeBron AND PLAYER2 != 0/empty (someone assisted LeBron)
+ *
+ * "3PT" in the play description distinguishes 3-pointers from 2s.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -72,7 +76,11 @@ function parseCsvLine(line: string): string[] {
   return out;
 }
 
-type Row = { scorerId: number; points: number };
+// direction is from LeBron's POV:
+//   "to"  → LeBron assisted teammate (LeBron is PLAYER2, teammate is PLAYER1=scorer)
+//   "by"  → teammate assisted LeBron (LeBron is PLAYER1=scorer, teammate is PLAYER2)
+type Direction = "to" | "by";
+type Row = { teammateId: number; points: number; direction: Direction };
 
 async function processSeason(csvPath: string): Promise<Row[]> {
   const stream = fs.createReadStream(csvPath, { encoding: "utf8" });
@@ -92,74 +100,96 @@ async function processSeason(csvPath: string): Promise<Row[]> {
     const cols = parseCsvLine(line);
 
     if (cols[idx.EVENTMSGTYPE] !== "1") continue; // made FG only
-    if (cols[idx.PLAYER2_ID] !== LEBRON_PERSON_ID) continue; // LeBron is the assister
+
+    const p1 = cols[idx.PLAYER1_ID];
+    const p2 = cols[idx.PLAYER2_ID];
+
+    let direction: Direction | null = null;
+    let teammateIdStr = "";
+    if (p2 === LEBRON_PERSON_ID && p1 && p1 !== LEBRON_PERSON_ID && p1 !== "0") {
+      direction = "to";
+      teammateIdStr = p1;
+    } else if (p1 === LEBRON_PERSON_ID && p2 && p2 !== LEBRON_PERSON_ID && p2 !== "0") {
+      direction = "by";
+      teammateIdStr = p2;
+    } else {
+      continue;
+    }
 
     const home = cols[idx.HOMEDESCRIPTION] ?? "";
     const visitor = cols[idx.VISITORDESCRIPTION] ?? "";
     const desc = home || visitor;
     if (!desc) continue;
 
-    const scorerIdStr = cols[idx.PLAYER1_ID];
-    const scorerId = parseInt(scorerIdStr, 10);
-    if (!Number.isFinite(scorerId) || scorerId <= 0) continue;
-    if (scorerIdStr === LEBRON_PERSON_ID) continue; // safety
+    const teammateId = parseInt(teammateIdStr, 10);
+    if (!Number.isFinite(teammateId) || teammateId <= 0) continue;
 
     // Made FGs are 2 or 3 points; "3PT" appears in the description for threes.
     const points = /\b3PT\b/.test(desc) ? 3 : 2;
-    out.push({ scorerId, points });
+    out.push({ teammateId, points, direction });
   }
   return out;
 }
 
 async function main() {
-  const onlyArg = process.argv.slice(2).find((a) => a.startsWith("--season="));
-  const seasons = onlyArg ? [parseInt(onlyArg.slice("--season=".length), 10)] : SEASONS;
+  // Full re-ingest only — both tables are dropped and rebuilt each run.
+  const seasons = SEASONS;
 
   const db = openDb(DB_PATH);
+  // New schema uses `teammate_player_id` for both directions. The old
+  // `scorer_player_id` column survives in pre-existing DBs; the API code
+  // reads via this script's table names so a fresh ingest replaces it.
   db.exec(`
-    CREATE TABLE IF NOT EXISTS lebron_assists_to (
-      scorer_player_id INTEGER PRIMARY KEY REFERENCES players(id),
-      assists          INTEGER NOT NULL,
-      points_off       INTEGER NOT NULL
+    DROP TABLE IF EXISTS lebron_assists_to;
+    DROP TABLE IF EXISTS lebron_assisted_by;
+    CREATE TABLE lebron_assists_to (
+      teammate_player_id INTEGER PRIMARY KEY REFERENCES players(id),
+      assists            INTEGER NOT NULL,
+      points_off         INTEGER NOT NULL
+    );
+    CREATE TABLE lebron_assisted_by (
+      teammate_player_id INTEGER PRIMARY KEY REFERENCES players(id),
+      assists            INTEGER NOT NULL,
+      points_off         INTEGER NOT NULL
     );
   `);
 
-  const totals = new Map<number, { assists: number; points: number }>();
+  const totalsTo = new Map<number, { assists: number; points: number }>();
+  const totalsBy = new Map<number, { assists: number; points: number }>();
   for (const startYear of seasons) {
     const label = `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
     console.log(`\nseason ${label}`);
     const csv = await downloadIfMissing(startYear);
     const rows = await processSeason(csv);
+    let toCount = 0, byCount = 0, toPts = 0, byPts = 0;
     for (const r of rows) {
-      const t = totals.get(r.scorerId) ?? { assists: 0, points: 0 };
+      const map = r.direction === "to" ? totalsTo : totalsBy;
+      const t = map.get(r.teammateId) ?? { assists: 0, points: 0 };
       t.assists += 1;
       t.points += r.points;
-      totals.set(r.scorerId, t);
+      map.set(r.teammateId, t);
+      if (r.direction === "to") { toCount++; toPts += r.points; }
+      else { byCount++; byPts += r.points; }
     }
-    const seasonAst = rows.length;
-    const seasonPts = rows.reduce((s, r) => s + r.points, 0);
-    console.log(`  → ${seasonAst} assists, ${seasonPts} points off them`);
+    console.log(`  → LeBron→teammate: ${toCount} ast / ${toPts} pts`);
+    console.log(`  → teammate→LeBron: ${byCount} ast / ${byPts} pts`);
   }
 
-  // If running with --season=, merge into existing rows; otherwise replace all.
-  const isFullRun = !onlyArg;
-  const upsert = db.prepare(
-    `INSERT INTO lebron_assists_to (scorer_player_id, assists, points_off)
-     VALUES (?, ?, ?)
-     ON CONFLICT(scorer_player_id) DO UPDATE SET
-       assists    = excluded.assists,
-       points_off = excluded.points_off`,
+  const upsertTo = db.prepare(
+    `INSERT INTO lebron_assists_to (teammate_player_id, assists, points_off) VALUES (?, ?, ?)`,
   );
-  const tx = db.transaction(() => {
-    if (isFullRun) db.exec("DELETE FROM lebron_assists_to");
-    for (const [scorerId, t] of totals) {
-      upsert.run(scorerId, t.assists, t.points);
-    }
-  });
-  tx();
+  const upsertBy = db.prepare(
+    `INSERT INTO lebron_assisted_by (teammate_player_id, assists, points_off) VALUES (?, ?, ?)`,
+  );
+  db.transaction(() => {
+    for (const [id, t] of totalsTo) upsertTo.run(id, t.assists, t.points);
+    for (const [id, t] of totalsBy) upsertBy.run(id, t.assists, t.points);
+  })();
 
-  const total = Array.from(totals.values()).reduce((s, t) => s + t.assists, 0);
-  console.log(`\ntotal: ${total} assists across ${totals.size} teammates`);
+  const totalTo = Array.from(totalsTo.values()).reduce((s, t) => s + t.assists, 0);
+  const totalBy = Array.from(totalsBy.values()).reduce((s, t) => s + t.assists, 0);
+  console.log(`\ntotal: LeBron→ ${totalTo} ast across ${totalsTo.size} teammates`);
+  console.log(`       →LeBron ${totalBy} ast from ${totalsBy.size} teammates`);
   db.close();
 }
 

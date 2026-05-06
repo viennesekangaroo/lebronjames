@@ -32,9 +32,11 @@ export async function GET() {
     const rows = db
       .prepare<[number, number], TeammateRow>(
         `WITH lebron_games AS (
-           SELECT game_id, team_id AS lebron_team_id
-           FROM appearances
-           WHERE player_id = ? AND minutes > 0
+           SELECT a.game_id, a.team_id AS lebron_team_id
+           FROM appearances a
+           JOIN games gx ON gx.id = a.game_id
+           WHERE a.player_id = ? AND a.minutes > 0
+             AND gx.game_type IN ('Regular Season', 'Playoffs')
          )
          SELECT a.player_id,
                 p.full_name,
@@ -95,17 +97,30 @@ export async function GET() {
     }
     const teammates = Array.from(byPlayer.values());
 
-    // Per-teammate assists from LeBron, ingested from regular-season PBP.
-    // Empty if `npm run ingest:assists` hasn't been run yet.
+    // Per-teammate two-way assist counts from regular-season PBP. Empty if
+    // `npm run ingest:assists` hasn't been run.
     const hasAssistsTable = db
       .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='lebron_assists_to'`)
       .get() as { name: string } | undefined;
-    const assistsByPlayer = new Map<number, number>();
+    const astTo = new Map<number, number>();      // LeBron → teammate (count)
+    const astBy = new Map<number, number>();      // teammate → LeBron (count)
+    const ptsOffTo = new Map<number, number>();   // pts on FGs LeBron assisted
+    const ptsOffBy = new Map<number, number>();   // pts on FGs teammate assisted (LeBron scored)
     if (hasAssistsTable) {
-      const rows = db
-        .prepare(`SELECT scorer_player_id, assists FROM lebron_assists_to`)
-        .all() as { scorer_player_id: number; assists: number }[];
-      for (const r of rows) assistsByPlayer.set(r.scorer_player_id, r.assists);
+      const toRows = db
+        .prepare(`SELECT teammate_player_id, assists, points_off FROM lebron_assists_to`)
+        .all() as { teammate_player_id: number; assists: number; points_off: number }[];
+      for (const r of toRows) {
+        astTo.set(r.teammate_player_id, r.assists);
+        ptsOffTo.set(r.teammate_player_id, r.points_off);
+      }
+      const byRows = db
+        .prepare(`SELECT teammate_player_id, assists, points_off FROM lebron_assisted_by`)
+        .all() as { teammate_player_id: number; assists: number; points_off: number }[];
+      for (const r of byRows) {
+        astBy.set(r.teammate_player_id, r.assists);
+        ptsOffBy.set(r.teammate_player_id, r.points_off);
+      }
     }
 
     const nodes = [
@@ -118,7 +133,10 @@ export async function GET() {
         radius: 1.6 + Math.pow(t.points / 100, 0.55) * 1.5,
         games: t.games,
         points: t.points,
-        assistsFromLebron: assistsByPlayer.get(t.playerId) ?? 0,
+        assistsFromLebron: astTo.get(t.playerId) ?? 0,
+        assistsToLebron: astBy.get(t.playerId) ?? 0,
+        ptsOffFromLebron: ptsOffTo.get(t.playerId) ?? 0,
+        ptsOffToLebron: ptsOffBy.get(t.playerId) ?? 0,
         firstTogether: t.first,
         lastTogether: t.last,
         teams: t.teams.sort((a, b) => b.points - a.points),
@@ -129,13 +147,18 @@ export async function GET() {
       source: "lebron",
       target: `p:${t.playerId}`,
       points: t.points,
+      astFrom: astTo.get(t.playerId) ?? 0, // LeBron → teammate
+      astTo: astBy.get(t.playerId) ?? 0,   // teammate → LeBron
     }));
 
     const lebronGames = db
-      .prepare(`SELECT COUNT(*) AS n FROM appearances WHERE player_id = ? AND minutes > 0`)
+      .prepare(`SELECT COUNT(*) AS n FROM appearances a JOIN games g ON g.id = a.game_id WHERE a.player_id = ? AND a.minutes > 0 AND g.game_type IN ('Regular Season', 'Playoffs')`)
       .get(lebronId) as { n: number };
 
-    // Career assists = regular-season only, matching the canonical career stat.
+    // Regular-season only — matches the PBP-derived per-teammate assist
+    // breakdowns (lebron_assists_to / lebron_assisted_by). The shufinskiy
+    // PBP source we ingest has no playoff games, so the headline number
+    // and the per-teammate sums reconcile.
     const lebronAssists = db
       .prepare(
         `SELECT COALESCE(SUM(a.assists), 0) AS n
@@ -146,14 +169,27 @@ export async function GET() {
       )
       .get(lebronId) as { n: number };
 
+    // Combined points off assists in either direction across all teammates.
+    // Honest counterpart to the per-teammate "combined" stat on the detail card.
+    const ptsOffCombined =
+      [...ptsOffTo.values()].reduce((s, n) => s + n, 0) +
+      [...ptsOffBy.values()].reduce((s, n) => s + n, 0);
+    const astFromLebron = [...astTo.values()].reduce((s, n) => s + n, 0);
+    const astToLebron = [...astBy.values()].reduce((s, n) => s + n, 0);
+
     return NextResponse.json({
       nodes,
       links,
       stats: {
         lebronGames: lebronGames.n,
         teammateCount: teammates.length,
-        totalPointsFed: teammates.reduce((s, t) => s + t.points, 0),
+        // Career RS assists from boxscore — canonical figure (12,016).
         lebronAssists: lebronAssists.n,
+        // Combined points off assists in both directions, from PBP.
+        ptsOffAssistsCombined: ptsOffCombined,
+        // Per-direction PBP totals, in case the overlay wants to break it out.
+        astFromLebron,
+        astToLebron,
       },
     });
   } catch (err) {

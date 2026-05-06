@@ -32,6 +32,8 @@ export type PointsPayload = {
   seasons: SeasonRollup[];
   maxCellPoints: number;
   maxMinute: number;
+  careerPoints: number;
+  careerGames: number;
 };
 
 export async function GET() {
@@ -118,10 +120,27 @@ export async function GET() {
       }
     }
 
+    // Career totals from the authoritative appearances table
+    const meta = db.prepare(`SELECT value FROM meta WHERE key = 'lebron_id'`).get() as { value: string } | undefined;
+    let careerPoints = 0;
+    let careerGames = 0;
+    if (meta) {
+      const lebronId = Number(meta.value);
+      const totals = db.prepare(
+        // Regular-season only — matches the lebron_scoring_events PBP grid
+        // this page is built on (the upstream PBP source has no playoff games).
+        `SELECT COUNT(*) AS games, COALESCE(SUM(points), 0) AS pts FROM appearances a JOIN games g ON g.id = a.game_id WHERE a.player_id = ? AND a.minutes > 0 AND g.game_type = 'Regular Season'`
+      ).get(lebronId) as { games: number; pts: number };
+      careerPoints = totals.pts;
+      careerGames = totals.games;
+    }
+
     const payload: PointsPayload = {
       seasons: Array.from(bySeason.values()),
       maxCellPoints,
       maxMinute,
+      careerPoints,
+      careerGames,
     };
     return NextResponse.json(payload);
   } catch (err) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findTeam, logoUrl } from "@/lib/teams";
-import type { PointsPayload, SeasonRollup, MinuteCell } from "@/app/api/lebron-points/route";
+import type { PointsPayload, SeasonRollup, MinuteCell } from "@/lib/api-types";
 
 type ApiErr = { code: "PBP_NOT_INGESTED" | "DB_ERROR" | "HTTP"; message: string };
 
@@ -49,7 +49,7 @@ export function PointsGrid() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/lebron-points");
+        const res = await fetch("/api/lebron-points.json");
         const text = await res.text();
         let body: unknown = null;
         try {
@@ -379,8 +379,8 @@ function InfoButton({ data }: { data: PointsPayload }) {
 }
 
 function InfoOverlay({ data, onClose }: { data: PointsPayload; onClose: () => void }) {
-  const totalPoints = data.seasons.reduce((s, x) => s + x.totalPoints, 0);
-  const totalGames = data.seasons.reduce((s, x) => s + x.games, 0);
+  const totalPoints = data.careerPoints;
+  const totalGames = data.careerGames;
   const peak = useMemo(() => {
     let best: { season: string; minute: number; points: number } | null = null;
     for (const s of data.seasons) {
@@ -412,15 +412,28 @@ function InfoOverlay({ data, onClose }: { data: PointsPayload; onClose: () => vo
         </button>
         <div className="font-mono text-xl font-light tracking-[0.15em] text-white/90">LeBron James</div>
         <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">Points by minute · regular season</div>
-        <div className="flex items-baseline gap-8 pt-1">
-          <div className="font-mono text-4xl font-light leading-none">
-            {totalPoints.toLocaleString()}
-            <span className="ml-2 text-[10px] uppercase tracking-[0.3em] text-white/40">points</span>
+
+        {/* Hero number */}
+        <div className="pt-2">
+          <div className="font-serif text-7xl font-light leading-none tracking-tight">{totalPoints.toLocaleString()}</div>
+          <div className="mt-2 text-[10px] uppercase tracking-[0.4em] text-white/40">career points</div>
+        </div>
+
+        <div className="flex items-baseline gap-8 border-t border-white/10 pt-4">
+          <div>
+            <div className="font-mono text-3xl font-light leading-none text-[#FDB927]">{totalGames.toLocaleString()}</div>
+            <div className="mt-1 text-[9px] uppercase tracking-[0.3em] text-white/40">games</div>
           </div>
-          <div className="font-mono text-4xl font-light leading-none">
-            {totalGames.toLocaleString()}
-            <span className="ml-2 text-[10px] uppercase tracking-[0.3em] text-white/40">games</span>
+          <div className="border-l border-white/10 pl-8">
+            <div className="font-mono text-3xl font-light leading-none">{data.seasons.length}</div>
+            <div className="mt-1 text-[9px] uppercase tracking-[0.3em] text-white/40">seasons</div>
           </div>
+          {peak && (
+            <div className="border-l border-white/10 pl-8">
+              <div className="font-mono text-3xl font-light leading-none">{peak.points}</div>
+              <div className="mt-1 text-[9px] uppercase tracking-[0.3em] text-white/40">peak min pts</div>
+            </div>
+          )}
         </div>
         <p className="text-sm leading-relaxed text-white/65">
           Each row is a season. Each dot is one of the 48 game minutes of regulation; size is the

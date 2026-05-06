@@ -33,19 +33,24 @@ type PlayerNode = {
   games: number;
   points: number;
   assistsFromLebron: number;
+  assistsToLebron: number;
+  ptsOffFromLebron: number;
+  ptsOffToLebron: number;
   firstTogether: string;
   lastTogether: string;
   teams: PlayerTeam[];
   radius: number;
 };
 type GraphNode = SelfNode | PlayerNode;
-type GraphLink = { source: string; target: string; points?: number };
+type GraphLink = { source: string; target: string; points?: number; astFrom?: number; astTo?: number };
 
 type Stats = {
   lebronGames: number;
   teammateCount: number;
-  totalPointsFed: number;
   lebronAssists: number;
+  ptsOffAssistsCombined: number;
+  astFromLebron: number;
+  astToLebron: number;
 };
 
 type Payload = { nodes: GraphNode[]; links: GraphLink[]; stats: Stats };
@@ -88,7 +93,7 @@ export function TeammatesGraph() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/lebron-teammates");
+        const res = await fetch("/api/lebron-teammates.json");
         const text = await res.text();
         let body: unknown = null;
         try {
@@ -124,12 +129,13 @@ export function TeammatesGraph() {
   }, [data]);
 
   const playerSearchList = useMemo(() => {
-    const out: { playerId: number; name: string; points: number; games: number; teams: string[]; node: PlayerNode }[] = [];
+    const out: { playerId: number; name: string; ptsOff: number; games: number; teams: string[]; node: PlayerNode }[] = [];
     playerIndex.forEach((nodes, playerId) => {
       const node = nodes[0];
-      out.push({ playerId, name: node.name, points: node.points, games: node.games, teams: node.teams.map((t) => t.abbr), node });
+      const ptsOff = (node.ptsOffFromLebron ?? 0) + (node.ptsOffToLebron ?? 0);
+      out.push({ playerId, name: node.name, ptsOff, games: node.games, teams: node.teams.map((t) => t.abbr), node });
     });
-    return out.sort((a, b) => b.points - a.points);
+    return out.sort((a, b) => b.ptsOff - a.ptsOff);
   }, [playerIndex]);
 
   useEffect(() => {
@@ -275,6 +281,18 @@ export function TeammatesGraph() {
     return mx;
   }, [data]);
 
+  // peak assists in either direction across all teammates — single normalizer
+  // so a thick gold strand and a thick blue strand mean the same magnitude.
+  const maxAst = useMemo(() => {
+    if (!data) return 1;
+    let mx = 1;
+    for (const l of data.links) {
+      if (l.astFrom && l.astFrom > mx) mx = l.astFrom;
+      if (l.astTo && l.astTo > mx) mx = l.astTo;
+    }
+    return mx;
+  }, [data]);
+
   const hasLanded = useRef(false);
   const landingUntil = useRef(0);
 
@@ -389,10 +407,17 @@ export function TeammatesGraph() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // Each teammate-with-assists yields TWO geos (one per direction). Teammates
+    // with no PBP assist data yield ONE faint geo as a fallback.
     type LinkGeo = {
       x1: number; y1: number; cx1: number; cy1: number;
       cx2: number; cy2: number; x2: number; y2: number;
-      playerId: number; points: number; intensity: number;
+      playerId: number;
+      intensity: number;
+      // dir: +1 = LeBron → teammate (gold, LEDs flow t 0→1)
+      //      -1 = teammate → LeBron (blue, LEDs flow t 1→0)
+      //       0 = neutral fallback (white-ish, no PBP data)
+      dir: 1 | -1 | 0;
     };
     const geos: LinkGeo[] = [];
     for (const l of positionedData.links) {
@@ -405,21 +430,49 @@ export function TeammatesGraph() {
       const dist = Math.hypot(dx, dy);
       if (dist < 1) continue;
       const player = tgtNode as PlayerNode & RTNode;
-      const j1 = hash01((player.playerId ^ 0xabad1dea) >>> 0);
-      const j2 = hash01((player.playerId ^ 0x51ed51ed) >>> 0);
       const theta = Math.atan2(dy, dx);
       const perpX = -Math.sin(theta), perpY = Math.cos(theta);
-      geos.push({
-        x1, y1,
-        cx1: x1 + dx * 0.33 + perpX * (j1 - 0.5) * dist * 0.4,
-        cy1: y1 + dy * 0.33 + perpY * (j1 - 0.5) * dist * 0.4,
-        cx2: x1 + dx * 0.66 + perpX * (j2 - 0.5) * dist * 0.4,
-        cy2: y1 + dy * 0.66 + perpY * (j2 - 0.5) * dist * 0.4,
-        x2, y2,
-        playerId: player.playerId,
-        points: (l as GraphLink).points ?? 0,
-        intensity: Math.pow(((l as GraphLink).points ?? 0) / (maxPoints || 1), 0.5),
-      });
+      const astFrom = (l as GraphLink).astFrom ?? 0;
+      const astTo = (l as GraphLink).astTo ?? 0;
+
+      if (astFrom === 0 && astTo === 0) {
+        // Fallback single curve, matching the static-strand fallback above.
+        const j1 = hash01((player.playerId ^ 0xabad1dea) >>> 0);
+        const j2 = hash01((player.playerId ^ 0x51ed51ed) >>> 0);
+        const points = (l as GraphLink).points ?? 0;
+        geos.push({
+          x1, y1,
+          cx1: x1 + dx * 0.33 + perpX * (j1 - 0.5) * dist * 0.4,
+          cy1: y1 + dy * 0.33 + perpY * (j1 - 0.5) * dist * 0.4,
+          cx2: x1 + dx * 0.66 + perpX * (j2 - 0.5) * dist * 0.4,
+          cy2: y1 + dy * 0.66 + perpY * (j2 - 0.5) * dist * 0.4,
+          x2, y2,
+          playerId: player.playerId,
+          intensity: Math.pow(points / (maxPoints || 1), 0.5),
+          dir: 0,
+        });
+        continue;
+      }
+
+      const bow = Math.min(dist * 0.06, 24);
+      const j = hash01((player.playerId ^ 0xabad1dea) >>> 0);
+      const wobble = (j - 0.5) * dist * 0.18;
+      const pushGeo = (dirSign: 1 | -1, count: number) => {
+        const off = dirSign * bow;
+        geos.push({
+          x1, y1,
+          cx1: x1 + dx * 0.30 + perpX * (off + wobble),
+          cy1: y1 + dy * 0.30 + perpY * (off + wobble),
+          cx2: x1 + dx * 0.70 + perpX * (off - wobble),
+          cy2: y1 + dy * 0.70 + perpY * (off - wobble),
+          x2, y2,
+          playerId: player.playerId,
+          intensity: Math.pow(count / (maxAst || 1), 0.5),
+          dir: dirSign,
+        });
+      };
+      pushGeo(1, astFrom);
+      pushGeo(-1, astTo);
     }
 
     const LED_COUNT = 6;
@@ -455,9 +508,12 @@ export function TeammatesGraph() {
         if (raw < 0.3) continue;
         const brightness = (raw - 0.3) / 0.7;
 
-        const u = 1 - t;
-        const gx = u*u*u*geo.x1 + 3*u*u*t*geo.cx1 + 3*u*t*t*geo.cx2 + t*t*t*geo.x2;
-        const gy = u*u*u*geo.y1 + 3*u*u*t*geo.cy1 + 3*u*t*t*geo.cy2 + t*t*t*geo.y2;
+        // Inbound strands (teammate → LeBron) flow from the teammate side
+        // toward LeBron, i.e. parametrically backward.
+        const tEff = geo.dir === -1 ? 1 - t : t;
+        const u = 1 - tEff;
+        const gx = u*u*u*geo.x1 + 3*u*u*tEff*geo.cx1 + 3*u*tEff*tEff*geo.cx2 + tEff*tEff*tEff*geo.x2;
+        const gy = u*u*u*geo.y1 + 3*u*u*tEff*geo.cy1 + 3*u*tEff*tEff*geo.cy2 + tEff*tEff*tEff*geo.y2;
 
         const screen = fg.graph2ScreenCoords(gx, gy);
         const sx = screen.x, sy = screen.y;
@@ -468,9 +524,19 @@ export function TeammatesGraph() {
         const isDim = (highlightedPlayerId !== null && !isHi) || filtered;
         if (isDim) continue;
 
-        const alpha = brightness * (isHi ? 0.9 : 0.08 + geo.intensity * 0.25);
+        const alpha = brightness * (isHi ? 0.9 : 0.08 + geo.intensity * 0.30);
         const r = isHi ? 3 : 1.0 + geo.intensity * 1.2;
-        const color = isHi ? "253,185,39" : "180,180,180";
+        // Color follows direction: gold (out), blue (in), neutral (no PBP data).
+        const baseColor =
+          geo.dir === 1 ? "253,185,39" :
+          geo.dir === -1 ? "94,182,255" :
+          "180,180,180";
+        const coreColor =
+          isHi ? "255,220,80" :
+          geo.dir === 1 ? "255,210,120" :
+          geo.dir === -1 ? "180,220,255" :
+          "200,200,200";
+        const color = isHi ? "253,185,39" : baseColor;
 
         const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 2.5);
         glow.addColorStop(0, `rgba(${color},${alpha})`);
@@ -481,7 +547,7 @@ export function TeammatesGraph() {
         ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = `rgba(${isHi ? "255,220,80" : "200,200,200"},${alpha})`;
+        ctx.fillStyle = `rgba(${coreColor},${alpha})`;
         ctx.beginPath();
         ctx.arc(sx, sy, r, 0, Math.PI * 2);
         ctx.fill();
@@ -491,7 +557,7 @@ export function TeammatesGraph() {
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [positionedData, size.w, size.h, maxPoints, highlightedPlayerId, isFilteredOut]);
+  }, [positionedData, size.w, size.h, maxPoints, maxAst, highlightedPlayerId, isFilteredOut]);
 
   // Unique teams LeBron played for (for team filter dropdown)
   const lebronTeams = useMemo(() => {
@@ -532,15 +598,23 @@ export function TeammatesGraph() {
       : [];
 
   return (
-    <div
-      ref={wrapRef}
-      className="relative h-full w-full bg-black"
-      onMouseMove={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        setCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-      }}
-      onMouseLeave={() => setCursor(null)}
-    >
+    <div className="relative flex h-full w-full bg-black">
+      {/* Left: infographic stat panel */}
+      {data && (
+        <div className="relative z-10 flex w-[340px] shrink-0 flex-col justify-center border-r border-white/8 px-10">
+          <AssistsStatsCard stats={data.stats} />
+        </div>
+      )}
+      {/* Right: graph */}
+      <div
+        ref={wrapRef}
+        className="relative min-w-0 flex-1"
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        }}
+        onMouseLeave={() => setCursor(null)}
+      >
       {positionedData && size.w > 0 && (
         <ForceGraph2D
           ref={fgRef as unknown as React.MutableRefObject<unknown>}
@@ -569,37 +643,76 @@ export function TeammatesGraph() {
             if (dist < 1) return;
 
             const player = tgt as PlayerNode;
-            const j1 = hash01((player.playerId ^ 0xabad1dea) >>> 0);
-            const j2 = hash01((player.playerId ^ 0x51ed51ed) >>> 0);
             const theta = Math.atan2(dy, dx);
             const perpX = -Math.sin(theta);
             const perpY = Math.cos(theta);
-            const curl1 = (j1 - 0.5) * dist * 0.4;
-            const curl2 = (j2 - 0.5) * dist * 0.4;
-            const cx1 = x1 + dx * 0.33 + perpX * curl1;
-            const cy1 = y1 + dy * 0.33 + perpY * curl1;
-            const cx2 = x1 + dx * 0.66 + perpX * curl2;
-            const cy2 = y1 + dy * 0.66 + perpY * curl2;
 
             const isHi = highlightedPlayerId !== null && player.playerId === highlightedPlayerId;
             const filtered = isFilteredOut(player);
             const isDim = (highlightedPlayerId !== null && !isHi) || (filtered && !isHi);
 
-            // "Feeding" accent: purple-blue flowing lines. Intensity based on points scored.
-            const pts = (l as GraphLink).points ?? 0;
-            const intensity = Math.pow(pts / maxPoints, 0.5);
-            const baseAlpha = 0.04 + intensity * 0.12;
+            const astFrom = (l as GraphLink).astFrom ?? 0;
+            const astTo = (l as GraphLink).astTo ?? 0;
 
-            ctx.strokeStyle = isHi
-              ? "rgba(253,185,39,0.9)"
-              : isDim
-              ? "rgba(138,100,255,0.015)"
-              : `rgba(138,100,255,${baseAlpha})`;
-            ctx.lineWidth = (isHi ? 1.5 : 0.3 + intensity * 0.5) / globalScale;
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.bezierCurveTo(cx1, cy1, cx2, cy2, x2, y2);
-            ctx.stroke();
+            // Fallback: faint single strand when we have no PBP assist data
+            // for this teammate (older seasons, short stints, etc.).
+            if (astFrom === 0 && astTo === 0) {
+              const j1 = hash01((player.playerId ^ 0xabad1dea) >>> 0);
+              const j2 = hash01((player.playerId ^ 0x51ed51ed) >>> 0);
+              const curl1 = (j1 - 0.5) * dist * 0.4;
+              const curl2 = (j2 - 0.5) * dist * 0.4;
+              const cx1 = x1 + dx * 0.33 + perpX * curl1;
+              const cy1 = y1 + dy * 0.33 + perpY * curl1;
+              const cx2 = x1 + dx * 0.66 + perpX * curl2;
+              const cy2 = y1 + dy * 0.66 + perpY * curl2;
+              const pts = (l as GraphLink).points ?? 0;
+              const intensity = Math.pow(pts / maxPoints, 0.5);
+              ctx.strokeStyle = isHi
+                ? "rgba(253,185,39,0.9)"
+                : isDim
+                ? "rgba(255,255,255,0.012)"
+                : `rgba(255,255,255,${0.03 + intensity * 0.05})`;
+              ctx.lineWidth = (isHi ? 1.5 : 0.25) / globalScale;
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.bezierCurveTo(cx1, cy1, cx2, cy2, x2, y2);
+              ctx.stroke();
+              return;
+            }
+
+            // Two parallel strands, bowed apart so they read as separate flows.
+            // The "bow" magnitude scales with distance so short edges still split.
+            const bow = Math.min(dist * 0.06, 24);
+            // Each strand keeps a small per-player jitter so the graph doesn't
+            // look like a perfect schematic.
+            const j = hash01((player.playerId ^ 0xabad1dea) >>> 0);
+            const wobble = (j - 0.5) * dist * 0.18;
+
+            const drawStrand = (
+              dirSign: 1 | -1,           // +1 = outbound side (gold), -1 = inbound side (blue)
+              count: number,             // assists in this direction
+              colorRgb: string,          // "253,185,39" etc.
+            ) => {
+              const off = dirSign * bow;
+              const cx1 = x1 + dx * 0.30 + perpX * (off + wobble);
+              const cy1 = y1 + dy * 0.30 + perpY * (off + wobble);
+              const cx2 = x1 + dx * 0.70 + perpX * (off - wobble);
+              const cy2 = y1 + dy * 0.70 + perpY * (off - wobble);
+              const intensity = Math.pow(count / (maxAst || 1), 0.5);
+              const alpha = isHi ? 0.85 : isDim ? 0.02 : 0.08 + intensity * 0.55;
+              const width = (isHi ? 1.6 : 0.4 + intensity * 1.6) / globalScale;
+              ctx.strokeStyle = `rgba(${colorRgb},${alpha})`;
+              ctx.lineWidth = width;
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.bezierCurveTo(cx1, cy1, cx2, cy2, x2, y2);
+              ctx.stroke();
+            };
+
+            // Always draw both, even if one is zero — a near-invisible strand
+            // signals "this direction was not used" rather than hiding it.
+            drawStrand(1, astFrom, "253,185,39");   // gold: LeBron → teammate
+            drawStrand(-1, astTo, "94,182,255");    // blue: teammate → LeBron
           }}
           onNodeHover={(n: unknown) => setHoverNode((n ?? null) as RTNode | null)}
           onNodeClick={(n: unknown) => {
@@ -738,7 +851,6 @@ export function TeammatesGraph() {
       )}
       {data && (
         <>
-          <InfoButton stats={data.stats} />
           <TeammatesControls
             players={playerSearchList}
             selectedPlayerId={selectedPlayerId}
@@ -759,77 +871,42 @@ export function TeammatesGraph() {
           />
         </>
       )}
+      </div>
     </div>
   );
 }
 
-function InfoButton({ stats }: { stats: Stats }) {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-
+function AssistsStatsCard({ stats }: { stats: Stats }) {
   return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="absolute left-6 top-6 z-10 rounded-md border border-white/20 bg-black/60 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.3em] text-white/90 backdrop-blur hover:border-white/45 hover:text-white"
-      >
-        about · ⓘ
-      </button>
-      {open && <InfoOverlay stats={stats} onClose={() => setOpen(false)} />}
-    </>
-  );
-}
+    <div className="space-y-8 text-white">
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">LeBron James</div>
+        <div className="mt-1 font-mono text-sm font-light tracking-[0.2em] text-white/60">The players he fed</div>
+      </div>
 
-function InfoOverlay({ stats, onClose }: { stats: Stats; onClose: () => void }) {
-  return (
-    <div
-      className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-[720px] max-w-[calc(100vw-3rem)] space-y-4 rounded-lg border border-white/15 bg-black/85 p-8 text-white shadow-[0_8px_48px_rgba(0,0,0,0.7)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 text-white/45 hover:text-white text-base leading-none"
-          aria-label="Close"
-        >
-          ×
-        </button>
-        <div className="font-mono text-xl font-light tracking-[0.15em] text-white/90">LeBron James</div>
-        <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">The players he fed</div>
-        <div className="flex items-baseline gap-8 pt-1">
-          <div className="font-mono text-4xl font-light leading-none">
-            {stats.lebronAssists.toLocaleString()}
-            <span className="ml-2 text-[10px] uppercase tracking-[0.3em] text-white/40">assists</span>
-          </div>
-          <div className="font-mono text-4xl font-light leading-none">
-            {stats.teammateCount.toLocaleString()}
-            <span className="ml-2 text-[10px] uppercase tracking-[0.3em] text-white/40">teammates</span>
-          </div>
-          <div className="font-mono text-4xl font-light leading-none">
-            {stats.totalPointsFed.toLocaleString()}
-            <span className="ml-2 whitespace-nowrap text-[10px] uppercase tracking-[0.3em] text-white/40">pts scored</span>
-          </div>
+      {/* Big hero number: assists */}
+      <div>
+        <div className="font-serif text-7xl font-light leading-none tracking-tight">{stats.lebronAssists.toLocaleString()}</div>
+        <div className="mt-2 text-[10px] uppercase tracking-[0.4em] text-white/40">career assists</div>
+      </div>
+
+      {/* Teammates / Points row */}
+      <div className="flex gap-6 border-t border-white/10 pt-6">
+        <div>
+          <div className="font-mono text-3xl font-light leading-none text-[#8a64ff]">{stats.teammateCount.toLocaleString()}</div>
+          <div className="mt-1 text-[9px] uppercase tracking-[0.3em] text-white/40">teammates</div>
         </div>
-        <p className="text-sm leading-relaxed text-white/65">
-          Across {stats.lebronGames.toLocaleString()} games, LeBron dished out {stats.lebronAssists.toLocaleString()} assists to {stats.teammateCount.toLocaleString()}{" "}
-          distinct teammates who combined for {stats.totalPointsFed.toLocaleString()} points in games alongside him.
-          Each line connects LeBron to a teammate — brighter and thicker connections mean more
-          points scored together. Dot size reflects total points.
+        <div className="border-l border-white/10 pl-6">
+          <div className="font-mono text-3xl font-light leading-none">{stats.ptsOffAssistsCombined.toLocaleString()}</div>
+          <div className="mt-1 text-[9px] uppercase tracking-[0.3em] text-white/40">pts off assists</div>
+        </div>
+      </div>
+
+      <div className="space-y-1 border-t border-white/8 pt-5">
+        <p className="text-xs leading-relaxed text-white/45">
+          Across {stats.lebronGames.toLocaleString()} games, LeBron dished out {stats.lebronAssists.toLocaleString()} assists
+          to {stats.teammateCount.toLocaleString()} distinct teammates.
         </p>
-        <div className="text-[10px] uppercase tracking-[0.3em] text-white/35">
-          press esc or click outside to close
-        </div>
       </div>
     </div>
   );
@@ -843,7 +920,7 @@ function TeammatesControls({
   teamFilter,
   onTeamChange,
 }: {
-  players: { playerId: number; name: string; points: number; games: number; teams: string[] }[];
+  players: { playerId: number; name: string; ptsOff: number; games: number; teams: string[] }[];
   selectedPlayerId: number | null;
   onSelect: (id: number | null) => void;
   lebronTeams: { abbr: string; fullName: string }[];
@@ -857,8 +934,9 @@ function TeammatesControls({
 
   const matches = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return players.slice(0, 8);
-    return players.filter((p) => p.name.toLowerCase().includes(needle)).slice(0, 12);
+    // Show the full set so the inner scroll engages — list is ~200 teammates max.
+    if (!needle) return players;
+    return players.filter((p) => p.name.toLowerCase().includes(needle));
   }, [q, players]);
 
   const selectedName = useMemo(
@@ -921,7 +999,13 @@ function TeammatesControls({
           >×</button>
         )}
         {searchOpen && matches.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto overscroll-contain rounded-sm border border-white/10 bg-black/95 backdrop-blur shadow-[0_8px_24px_rgba(0,0,0,0.6)]">
+          <div
+            // Prevent the input from losing focus when the user clicks the
+            // scrollbar (otherwise onBlur fires and the dropdown closes
+            // before the scroll registers).
+            onMouseDown={(e) => e.preventDefault()}
+            className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto overscroll-contain rounded-sm border border-white/10 bg-black/95 backdrop-blur shadow-[0_8px_24px_rgba(0,0,0,0.6)]"
+          >
             {matches.map((p) => (
               <button
                 key={p.playerId}
@@ -931,7 +1015,7 @@ function TeammatesControls({
               >
                 <span className="font-mono truncate">{p.name}</span>
                 <span className="flex items-center gap-1.5 text-white/40">
-                  <span className="text-[10px]">{p.points.toLocaleString()}pts</span>
+                  <span className="text-[10px]">{p.ptsOff.toLocaleString()}pts off ast</span>
                   <span className="flex items-center gap-1">
                     {p.teams.slice(0, 3).map((abbr) => {
                       const tm = findTeam(abbr);
@@ -1070,13 +1154,19 @@ function TeammatesDetailCard({
     if (!allTeamsForPlayer.length) return null;
     const games = allTeamsForPlayer.reduce((s, n) => s + n.games, 0);
     const points = allTeamsForPlayer.reduce((s, n) => s + n.points, 0);
-    const assists = allTeamsForPlayer[0]?.assistsFromLebron ?? 0;
+    const astFrom = allTeamsForPlayer[0]?.assistsFromLebron ?? 0;
+    const astTo = allTeamsForPlayer[0]?.assistsToLebron ?? 0;
+    const ptsOffFrom = allTeamsForPlayer[0]?.ptsOffFromLebron ?? 0;
+    const ptsOffTo = allTeamsForPlayer[0]?.ptsOffToLebron ?? 0;
     const firsts = allTeamsForPlayer.map((n) => n.firstTogether).sort();
     const lasts = allTeamsForPlayer.map((n) => n.lastTogether).sort();
     return {
       games,
       points,
-      assists,
+      astFrom,
+      astTo,
+      ptsOffFrom,
+      ptsOffTo,
       firstYear: firsts[0]?.slice(0, 4) ?? "",
       lastYear: lasts[lasts.length - 1]?.slice(0, 4) ?? "",
     };
@@ -1119,11 +1209,21 @@ function TeammatesDetailCard({
             <button onClick={onClear} className="text-white/40 hover:text-white text-xs" aria-label="Clear selection">×</button>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-3 font-mono">
+        <div className="grid grid-cols-2 gap-3 font-mono">
           <Stat label="games" value={aggregate.games} accent="text-white" />
-          <Stat label="assists" value={aggregate.assists} accent="text-[#ffb547]" />
-          <Stat label="pts scored" value={aggregate.points} accent="text-[#8a64ff]" />
+          <Stat
+            label="pts off assists"
+            value={aggregate.ptsOffFrom + aggregate.ptsOffTo}
+            accent="text-[#8a64ff]"
+          />
         </div>
+        <AssistFlow
+          name={player.name}
+          fromLebron={aggregate.astFrom}
+          toLebron={aggregate.astTo}
+          ptsFromLebron={aggregate.ptsOffFrom}
+          ptsToLebron={aggregate.ptsOffTo}
+        />
         <div className="flex flex-wrap gap-1.5 pt-1">
           {player.teams.map((t) => {
             const teamMeta = findTeam(t.abbr);
@@ -1157,6 +1257,73 @@ function Stat({ label, value, accent }: { label: string; value: number; accent: 
     <div>
       <div className={`text-xl leading-none ${accent}`}>{value.toLocaleString()}</div>
       <div className="mt-1 text-[9px] uppercase tracking-[0.25em] text-white/40">{label}</div>
+    </div>
+  );
+}
+
+// Two-way assist exchange. Bar widths are proportional to the larger side, so
+// you can see at a glance who fed whom more. Each row shows assist count and
+// the points scored on those assists (so the math is internally consistent).
+function AssistFlow({
+  name, fromLebron, toLebron, ptsFromLebron, ptsToLebron,
+}: {
+  name: string;
+  fromLebron: number; toLebron: number;
+  ptsFromLebron: number; ptsToLebron: number;
+}) {
+  const firstName = name.split(/\s+/)[0] ?? name;
+  const max = Math.max(fromLebron, toLebron, 1);
+  const fromPct = Math.round((fromLebron / max) * 100);
+  const toPct = Math.round((toLebron / max) * 100);
+  if (fromLebron === 0 && toLebron === 0) return null;
+  return (
+    <div className="space-y-1.5 border-t border-white/10 pt-3 font-mono">
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.25em] text-white/40">
+        <span>assists</span>
+        <span className="text-white/30">ast · pts</span>
+      </div>
+      <div className="space-y-1.5">
+        <FlowRow
+          leftLabel="LeBron"
+          arrow="→"
+          rightLabel={firstName}
+          value={fromLebron}
+          pts={ptsFromLebron}
+          pct={fromPct}
+          color="#ffb547"
+        />
+        <FlowRow
+          leftLabel={firstName}
+          arrow="→"
+          rightLabel="LeBron"
+          value={toLebron}
+          pts={ptsToLebron}
+          pct={toPct}
+          color="#5eb6ff"
+        />
+      </div>
+    </div>
+  );
+}
+
+function FlowRow({
+  leftLabel, arrow, rightLabel, value, pts, pct, color,
+}: { leftLabel: string; arrow: string; rightLabel: string; value: number; pts: number; pct: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] text-white/85">
+      <div className="w-[112px] shrink-0 truncate text-[10px] tracking-[0.05em] text-white/55">
+        {leftLabel} <span className="text-white/35">{arrow}</span> {rightLabel}
+      </div>
+      <div className="relative h-1.5 flex-1 overflow-hidden rounded-sm bg-white/5">
+        <div
+          className="absolute inset-y-0 left-0 rounded-sm"
+          style={{ width: `${pct}%`, backgroundColor: color, opacity: 0.85 }}
+        />
+      </div>
+      <div className="shrink-0 text-right tabular-nums text-[10px]" style={{ color }}>
+        <span className="font-medium">{value.toLocaleString()}</span>
+        <span className="ml-1 text-white/45">· {pts.toLocaleString()}p</span>
+      </div>
     </div>
   );
 }

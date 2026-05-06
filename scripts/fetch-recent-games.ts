@@ -44,9 +44,23 @@ async function fetchGameLog(seasonStartYear: number) {
   url.searchParams.set("SeasonType", "Regular Season");
   url.searchParams.set("LeagueID", "00");
 
-  const res = await fetch(url, { headers: NBA_HEADERS });
-  if (!res.ok) throw new Error(`stats.nba.com ${res.status} ${res.statusText}`);
-  const json = (await res.json()) as StatsResponse;
+  // stats.nba.com sometimes hangs. Bound each request, retry once on timeout.
+  let json: StatsResponse | null = null;
+  for (let attempt = 1; attempt <= 3 && !json; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 15_000);
+    try {
+      const res = await fetch(url, { headers: NBA_HEADERS, signal: ac.signal });
+      if (!res.ok) throw new Error(`stats.nba.com ${res.status} ${res.statusText}`);
+      json = (await res.json()) as StatsResponse;
+    } catch (err) {
+      if (attempt === 3) throw err;
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (!json) throw new Error("unreachable");
   const set = json.resultSets.find((s) => s.name === "PlayerGameLog");
   if (!set) throw new Error("no PlayerGameLog set in response");
   const idx = Object.fromEntries(set.headers.map((h, i) => [h, i]));

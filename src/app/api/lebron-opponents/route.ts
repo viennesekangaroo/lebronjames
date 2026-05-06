@@ -40,9 +40,11 @@ export async function GET() {
     const rows = db
       .prepare<[number, number], OpponentRow>(
         `WITH lebron_games AS (
-           SELECT game_id, team_id AS lebron_team_id
-           FROM appearances
-           WHERE player_id = ? AND minutes > 0
+           SELECT a.game_id, a.team_id AS lebron_team_id
+           FROM appearances a
+           JOIN games gx ON gx.id = a.game_id
+           WHERE a.player_id = ? AND a.minutes > 0
+             AND gx.game_type IN ('Regular Season', 'Playoffs')
          )
          SELECT a.player_id,
                 p.full_name,
@@ -97,10 +99,10 @@ export async function GET() {
     }
 
     const lebronGames = db
-      .prepare(`SELECT COUNT(*) AS n FROM appearances WHERE player_id = ? AND minutes > 0`)
+      .prepare(`SELECT COUNT(*) AS n FROM appearances a JOIN games g ON g.id = a.game_id WHERE a.player_id = ? AND a.minutes > 0 AND g.game_type IN ('Regular Season', 'Playoffs')`)
       .get(lebronId) as { n: number };
     const totalPlayers = db
-      .prepare(`SELECT COUNT(DISTINCT player_id) AS n FROM appearances WHERE minutes > 0`)
+      .prepare(`SELECT COUNT(DISTINCT a.player_id) AS n FROM appearances a JOIN games g ON g.id = a.game_id WHERE a.minutes > 0 AND g.game_type IN ('Regular Season', 'Playoffs')`)
       .get() as { n: number };
 
     // Collapse multi-team rows into one entry per opponent — fewer, more meaningful dots.

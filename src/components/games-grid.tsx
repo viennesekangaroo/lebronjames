@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findTeam, logoUrl } from "@/lib/teams";
-import type { GamesPayload, SeasonRow, GameCell } from "@/app/api/lebron-games/route";
+import type { GamesPayload, SeasonRow, GameCell } from "@/lib/api-types";
 
 type ApiErr = { code: "DB_NOT_SEEDED" | "DB_ERROR" | "HTTP"; message: string };
 
@@ -35,7 +35,7 @@ export function GamesGrid() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/lebron-games");
+        const res = await fetch("/api/lebron-games.json");
         const text = await res.text();
         let body: unknown = null;
         try {

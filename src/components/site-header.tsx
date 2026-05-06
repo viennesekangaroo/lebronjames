@@ -9,6 +9,7 @@ const PAGES = [
   { href: "/shots", label: "Shots" },
   { href: "/points", label: "Points" },
   { href: "/games", label: "Games" },
+  { href: "/playoffs", label: "Playoffs" },
 ];
 
 export function SiteHeader() {

@@ -111,7 +111,7 @@ export function OpponentsGraph() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/lebron-opponents");
+        const res = await fetch("/api/lebron-opponents.json");
         const text = await res.text();
         let body: unknown = null;
         try {

@@ -64,7 +64,7 @@ export function ShotChart() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/lebron-shots");
+        const res = await fetch("/api/lebron-shots.json");
         const text = await res.text();
         let body: unknown = null;
         try {

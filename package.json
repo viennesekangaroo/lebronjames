@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "tsx scripts/prebuild-static.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,8 +12,10 @@
     "ingest:pbp": "tsx scripts/ingest-pbp.ts",
     "ingest:assists": "tsx scripts/ingest-assists.ts",
     "fetch:recent": "tsx scripts/fetch-recent-games.ts",
+    "seed:nba": "tsx scripts/seed-from-nba.ts",
     "fetch-shots": "tsx scripts/fetch-shots.ts",
-    "seed-shots": "tsx scripts/seed-shots.ts"
+    "seed-shots": "tsx scripts/seed-shots.ts",
+    "validate": "tsx scripts/validate-nba.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
