@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { findTeam, logoUrl } from "@/lib/teams";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 function withAlpha(hex: string, alpha: number): string {
   if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
@@ -82,6 +83,7 @@ export function TeammatesGraph() {
   const [data, setData] = useState<Payload | null>(null);
   const [apiErr, setApiErr] = useState<ApiErr | null>(null);
   const [hoverNode, setHoverNode] = useState<RTNode | null>(null);
+  const minLoading = useMinLoader(1000);
   const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -601,7 +603,7 @@ export function TeammatesGraph() {
   return (
     <div className="relative flex h-full w-full bg-black">
       {/* Left: infographic stat panel */}
-      {data && (
+      {data && !minLoading && (
         <div className="relative z-10 flex w-[340px] shrink-0 flex-col justify-center border-r border-white/8 px-10">
           <AssistsStatsCard stats={data.stats} />
         </div>
@@ -616,7 +618,7 @@ export function TeammatesGraph() {
         }}
         onMouseLeave={() => setCursor(null)}
       >
-      {positionedData && size.w > 0 && (
+      {positionedData && size.w > 0 && !minLoading && (
         <ForceGraph2D
           ref={fgRef as unknown as React.MutableRefObject<unknown>}
           width={size.w}
@@ -827,15 +829,15 @@ export function TeammatesGraph() {
           }}
         />
       )}
-      {positionedData && size.w > 0 && (
+      {positionedData && size.w > 0 && !minLoading && (
         <canvas
           ref={ledCanvasRef}
           className="pointer-events-none absolute inset-0"
           style={{ width: size.w, height: size.h }}
         />
       )}
-      {!data && !apiErr && <BallLoader color="#8a64ff" />}
-      {data && (
+      {(!data || minLoading) && !apiErr && <BallLoader color="#8a64ff" />}
+      {data && !minLoading && (
         <>
           <TeammatesControls
             players={playerSearchList}

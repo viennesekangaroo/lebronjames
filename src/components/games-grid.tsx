@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { findTeam, logoUrl } from "@/lib/teams";
 import type { GamesPayload, SeasonRow, GameCell } from "@/lib/api-types";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 type ApiErr = { code: "DB_NOT_SEEDED" | "DB_ERROR" | "HTTP"; message: string };
 
@@ -29,6 +30,7 @@ export function GamesGrid() {
   const [data, setData] = useState<GamesPayload | null>(null);
   const [apiErr, setApiErr] = useState<ApiErr | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const minLoading = useMinLoader(1000);
   const [hover, setHover] = useState<Hover | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -115,9 +117,9 @@ export function GamesGrid() {
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-black">
-      {!data && <BallLoader color="#e87e24" />}
+      {(!data || minLoading) && <BallLoader color="#e87e24" />}
 
-      {data && layout && (
+      {data && layout && !minLoading && (
         <>
           <Grid data={data} layout={layout} setHover={setHover} />
           <InfoButton data={data} />

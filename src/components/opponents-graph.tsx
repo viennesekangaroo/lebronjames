@@ -6,6 +6,7 @@ import { getStarColor } from "@/lib/star-colors";
 import { findTeam, logoUrl } from "@/lib/teams";
 import { TEAM_ERAS, eraMatches, type TeamEra } from "@/lib/team-eras";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 function withAlpha(hex: string, alpha: number): string {
   if (hex.startsWith("rgba") || hex.startsWith("rgb")) return hex;
@@ -92,6 +93,7 @@ export function OpponentsGraph() {
   const [data, setData] = useState<Payload | null>(null);
   const [apiErr, setApiErr] = useState<ApiErr | null>(null);
   const [hoverNode, setHoverNode] = useState<RTNode | null>(null);
+  const minLoading = useMinLoader(1000);
   const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -441,7 +443,7 @@ export function OpponentsGraph() {
       }}
       onMouseLeave={() => setCursor(null)}
     >
-      {positionedData && size.w > 0 && (
+      {positionedData && size.w > 0 && !minLoading && (
         <ForceGraph2D
           ref={fgRef as unknown as React.MutableRefObject<unknown>}
           width={size.w}
@@ -622,8 +624,8 @@ export function OpponentsGraph() {
           }}
         />
       )}
-      {!data && !apiErr && <BallLoader color="#e87e24" />}
-      {data && (
+      {(!data || minLoading) && !apiErr && <BallLoader color="#e87e24" />}
+      {data && !minLoading && (
         <>
           <StatsHeader stats={data.stats} />
           <Controls

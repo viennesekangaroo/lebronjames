@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { findTeam, logoUrl } from "@/lib/teams";
 import type { PointsPayload, SeasonRollup, MinuteCell } from "@/lib/api-types";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 type ApiErr = { code: "PBP_NOT_INGESTED" | "DB_ERROR" | "HTTP"; message: string };
 
@@ -43,6 +44,7 @@ export function PointsGrid() {
   const [data, setData] = useState<PointsPayload | null>(null);
   const [apiErr, setApiErr] = useState<ApiErr | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const minLoading = useMinLoader(1000);
   const [hover, setHover] = useState<HoverCell | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -129,9 +131,9 @@ export function PointsGrid() {
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-black">
-      {!data && <BallLoader color="#a78bfa" />}
+      {(!data || minLoading) && <BallLoader color="#a78bfa" />}
 
-      {data && layout && (
+      {data && layout && !minLoading && (
         <>
           <ScrollableGrid data={data} layout={layout} setHover={setHover} />
           <InfoButton data={data} />

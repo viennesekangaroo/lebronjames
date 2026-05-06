@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ComputedRecords } from "@/lib/api-types";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 // Hybrid records page: career-volume numbers come from the SQLite DB (always
 // current with the seed); award counts, win shares, VORP, and "all-time #1"
@@ -78,6 +79,7 @@ type ApiErr = { code: string; message: string };
 export function RecordsPage() {
   const [data, setData] = useState<ComputedRecords | null>(null);
   const [err, setErr] = useState<ApiErr | null>(null);
+  const minLoading = useMinLoader(1000);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +119,7 @@ export function RecordsPage() {
       </div>
     );
   }
-  if (!data) {
+  if (!data || minLoading) {
     return (
       <div className="relative h-full w-full bg-black">
         <BallLoader color="#fdb927" />

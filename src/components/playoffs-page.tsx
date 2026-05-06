@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { findTeam } from "@/lib/teams";
 import type { PlayoffsPayload, FinalsEntry } from "@/lib/api-types";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 type ApiErr = { code: string; message: string };
 
@@ -12,6 +13,7 @@ const GOLD = "#FDB927";
 export function PlayoffsPage() {
   const [data, setData] = useState<PlayoffsPayload | null>(null);
   const [err, setErr] = useState<ApiErr | null>(null);
+  const minLoading = useMinLoader(1000);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +53,7 @@ export function PlayoffsPage() {
       </div>
     );
   }
-  if (!data) {
+  if (!data || minLoading) {
     return (
       <div className="relative h-full w-full bg-black">
         <BallLoader color="#c9a449" />

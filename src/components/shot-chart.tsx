@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { drawFullCourt, nbaToCanvasFullCourt } from "@/lib/court";
 import { TEAM_ERAS, eraMatches, type TeamEra } from "@/lib/team-eras";
 import { BallLoader } from "@/components/ball-loader";
+import { useMinLoader } from "@/lib/use-min-loader";
 
 type Shot = {
   game_date: string;
@@ -41,6 +42,7 @@ export function ShotChart() {
   const [data, setData] = useState<Payload | null>(null);
   const [apiErr, setApiErr] = useState<ApiErr | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const minLoading = useMinLoader(1000);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -257,7 +259,7 @@ export function ShotChart() {
   return (
     <div className="relative flex h-full w-full bg-black">
       {/* Left: infographic stat panel */}
-      {data && (
+      {data && !minLoading && (
         <div className="relative z-10 flex w-[340px] shrink-0 flex-col justify-center border-r border-white/8 px-10">
           <StatsCard
             total={filteredShots.length}
@@ -274,8 +276,8 @@ export function ShotChart() {
       <div className="relative flex min-w-0 flex-1 flex-col">
         <div ref={wrapRef} className="relative min-h-0 flex-1">
           <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-          {!data && <BallLoader color="#ff6b1a" label="loading shots" />}
-          {data && (
+          {(!data || minLoading) && <BallLoader color="#ff6b1a" label="loading shots" />}
+          {data && !minLoading && (
             <>
               <Legend resultFilter={resultFilter} onToggle={setResultFilter} />
               <Controls
@@ -294,7 +296,7 @@ export function ShotChart() {
             </>
           )}
         </div>
-        {data && (
+        {data && !minLoading && (
           <Playback
             total={filteredShots.length}
             progress={upTo}
