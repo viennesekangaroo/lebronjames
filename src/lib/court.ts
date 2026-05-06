@@ -34,13 +34,13 @@ export const COURT = {
   laneTicks: [110, 130, 155], // open ticks for FT alignment
 } as const;
 
-// NBA stat-API loc_y values: rim at 0, baseline at ~-47.5, half-court at 470.
-// loc_x is sideline (negative = audience-left of basket). Three-point radius
-// is 237.5 in NBA units, which matches our court frame's 237.5 — so the scale
-// is identically 1. We just translate so that NBA (0,0) lands on the rim.
-const NBA_RIM_TO_BASELINE = 47.5;
-const COURT_RIM_TO_BASELINE = COURT.rim.x - COURT.baseline; // = 55
-const SCALE_X = COURT_RIM_TO_BASELINE / NBA_RIM_TO_BASELINE;
+// NBA stat-API coords use the same units as our court frame: rim at (0, 0),
+// baseline at loc_y ≈ -47.5, half-court at +470, sidelines at loc_x = ±250.
+// Three-point radius is 237.5 in both systems, so the scale is 1. We just
+// translate so NBA (0, 0) lands on the rim. (Earlier code stretched depth
+// to make 47.5 NBA-units fit our court's 55-unit rim-to-baseline distance,
+// which pushed 3PT shots ~16% past the painted arc.)
+const SCALE_X = 1;
 const SCALE_Y = 1;
 
 // Compute the largest UNIFORM scale that fits the court rect (470×500) into
